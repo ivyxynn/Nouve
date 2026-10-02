@@ -6,16 +6,21 @@ import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { Ticker } from "./ticker";
 import { State, type AgentTask } from "../core/state";
-import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
-import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
+import { type IslandViewName, type Wash } from "../core/layout";
+import { createMiniBot, pruneMiniBots } from "../nouve/minibots";
 import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
+import type { LeaveReason } from "./terminal";
+import { classifyApproval } from "../core/sensitivity";
+import { card, applyWash } from "./card";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
   collapse(): void;
   setFocus(id: string): void;
+  /** Terminal Minimize / Close / `exit`: leave the panel, playing the shrink. */
+  leaveTerminal(reason: LeaveReason): void;
   openTerminal(): void;
   /** The ↗ button: opens whatever the focused pill points at. */
   openTarget(): void;
@@ -38,12 +43,6 @@ export interface ViewHost {
 }
 
 // ── Shared pieces ─────────────────────────────────────────────────────────────
-
-function card(wash: Wash, ...children: (Node | string)[]): HTMLElement {
-  const el = h("div", { class: wash ? "card wash" : "card" }, ...children);
-  if (wash) el.style.setProperty("--wash", washRGBA(wash));
-  return el;
-}
 
 function btn(
   label: string,
@@ -126,9 +125,11 @@ function buildOverview(actions: ViewActions): ViewHost {
     { class: "icon-btn jump", title: "Open", onclick: () => actions.openTarget() },
     svg(ICONS.arrowUpRight, 8),
   );
-  const left = card(null, leftBody, jump);
+  const left = card("calm", leftBody, jump);
   const pills = h("div", { class: "pills" });
-  const right = card(null, pills);
+  const rightBody = h("div", { class: "right-body", style: "height:100%;width:100%;display:flex;flex-direction:column;" });
+  rightBody.append(pills);
+  const right = card("calm", rightBody);
 
   const el = h("div", { class: "view overview" },
     h("div", { class: "left" }, left),
@@ -138,7 +139,7 @@ function buildOverview(actions: ViewActions): ViewHost {
   let pillIds = "";
   let detailOpen = false;
   let lastFocus: string | null = null;
-  let mode: "ticker" | "card" | null = null;
+  let mode: "ticker" | "card" | "terminal" | null = null;
   let cardKey = "";
 
   const hooks: IntegrationCardHooks = {
@@ -156,6 +157,10 @@ function buildOverview(actions: ViewActions): ViewHost {
       State.notify();
     },
     openSettings: () => actions.openSettingsWindow(),
+    // The terminal was left (Minimize, Close or `exit`): hand the overview back
+    // through the island, which plays the shrink. sync() then tears the terminal
+    // view down and puts the pills back.
+    closeTerminal: (reason) => actions.leaveTerminal(reason),
   };
 
   return {
@@ -166,10 +171,18 @@ function buildOverview(actions: ViewActions): ViewHost {
     sync() {
       const task = State.focusTask;
       if (task?.id !== lastFocus) {
+        // Leaving the terminal must put the pills back: `mode` is reset below,
+        // so the `else` branch's own terminal check would never fire and the
+        // xterm panel would stay stuck in rightBody.
+        const leavingTerminal = mode === "terminal";
         lastFocus = task?.id ?? null;
         detailOpen = false;
         cardKey = "";
         mode = null;
+        if (leavingTerminal) {
+          clear(rightBody);
+          rightBody.append(pills);
+        }
       }
 
       // VS Code with a live Claude Code session keeps the ticker; every other
@@ -177,42 +190,78 @@ function buildOverview(actions: ViewActions): ViewHost {
       const sessionActive =
         task?.id === "integration_claude" && (task.state !== "idle" || task.steps.length > 0);
 
-      if (task && sessionActive) {
-        if (mode !== "ticker") {
+      if (task?.id === "integration_terminal") {
+        if (mode !== "terminal") {
+          mode = "terminal";
+          cardKey = "terminal";
           clear(leftBody);
-          leftBody.append(tickerBody);
-          mode = "ticker";
+
+          // Left card: Nouve bot status with steps, exactly like Gambar 2
+          const termWho = h("div", { class: "who" },
+            dot("#4CAF50", 7),
+            h("span", { class: "name", text: "Nouve" }),
+            h("span", { class: "tool", text: "Terminal (OMP)" }),
+          );
+          const termSteps = h("div", { style: "display:flex;flex-direction:column;gap:8px;padding:14px 16px 0 108px;font-size:12px;color:#8ba2c4;" },
+            h("div", { style: "display:flex;align-items:center;gap:8px;color:#4CAF50;font-weight:600;" }, h("span", { text: "?" }), h("span", { text: "ConPTY Session Live" })),
+            h("div", { style: "display:flex;align-items:center;gap:8px;color:#4CAF50;font-weight:600;" }, h("span", { text: "?" }), h("span", { text: "System PATH (Registry)" })),
+            h("div", { style: "display:flex;align-items:center;gap:8px;color:#38bdf8;font-weight:600;" }, h("span", { text: "?" }), h("span", { text: "CLI (agy, codex, opencode)" })),
+          );
+          leftBody.append(h("div", { class: "card-body" }, termWho, termSteps));
+
+          clear(rightBody);
+          rightBody.append(renderIntegrationCard(task, hooks));
+        }
+      } else {
+        if (mode === "terminal") {
+          mode = null;
           cardKey = "";
+          clear(rightBody);
+          rightBody.append(pills);
         }
-        clear(who);
-        who.append(
-          dot(task.color, 7),
-          h("span", { class: "name", text: task.name }),
-          h("span", { class: "tool", text: task.source === "claudeCode" ? "Claude Code" : "n8n" }),
-        );
-        if (task.steps.length > 1) {
-          who.append(h("span", {
-            class: "count",
-            text: `${Math.min(task.stepIndex + 1, task.steps.length)}/${task.steps.length}`,
-          }));
-        }
-        ticker.sync(task);
-      } else if (task) {
-        const info = State.integrations[task.id];
-        const key = [
-          task.id, detailOpen, task.state, task.steps.join("|"),
-          info?.loaded, info?.error, info?.configured,
-          JSON.stringify(info?.data ?? {}),
-        ].join("~");
-        if (key !== cardKey) {
-          cardKey = key;
-          mode = "card";
-          clear(leftBody);
-          leftBody.append(renderIntegrationCard(task, hooks));
+        if (task && sessionActive) {
+          if (mode !== "ticker") {
+            clear(leftBody);
+            leftBody.append(tickerBody);
+            mode = "ticker";
+            cardKey = "";
+          }
+          clear(who);
+          who.append(
+            dot(task.color, 7),
+            h("span", { class: "name", text: task.name }),
+            h("span", { class: "tool", text: task.source === "claudeCode" ? "Claude Code" : "n8n" }),
+          );
+          if (task.steps.length > 1) {
+            who.append(h("span", {
+              class: "count",
+              text: `${Math.min(task.stepIndex + 1, task.steps.length)}/${task.steps.length}`,
+            }));
+          }
+          ticker.sync(task);
+        } else if (task) {
+          const info = State.integrations[task.id];
+          const key = [
+            task.id, detailOpen, task.state, task.steps.join("|"),
+            info?.loaded, info?.error, info?.configured,
+            JSON.stringify(info?.data ?? {}),
+          ].join("~");
+          if (key !== cardKey) {
+            cardKey = key;
+            mode = "card";
+            clear(leftBody);
+            leftBody.append(renderIntegrationCard(task, hooks));
+          }
         }
       }
 
       jump.style.display = detailOpen ? "none" : "";
+
+      // The overview rests on the calm wash, but the moment either panel holds
+      // real content — an integration card on the left, the terminal on the right
+      // — that panel goes back to plain. Dense data reads better without a tint.
+      applyWash(left, mode ? null : "calm");
+      applyWash(right, mode === "terminal" ? null : "calm");
 
       const others = State.otherTasks.slice(0, 4);
       const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|");
@@ -283,7 +332,7 @@ function buildEmpty(actions: ViewActions): ViewHost {
     h("div", { class: "grow" }),
     btn("Ask Claude", "primary", () => actions.setView("prompt")),
   );
-  return { el: h("div", { class: "view" }, card(null, body)), sync() {} };
+  return { el: h("div", { class: "view" }, card("calm", body)), sync() {} };
 }
 
 // ── Approval ──────────────────────────────────────────────────────────────────
@@ -292,17 +341,32 @@ function buildApproval(actions: ViewActions): ViewHost {
   const who = h("div");
   const code = h("div", { class: "code" });
   const row = h("div", { class: "actions" });
-  const el = h("div", { class: "view" }, card("amber", stack(116, 16, who, code, row)));
+  const cardEl = card("amber", stack(116, 16, who, code, row));
+  const el = h("div", { class: "view" }, cardEl);
   let rowKey = "";
   return {
     el,
     sync() {
+      const approval = State.pendingApproval;
       clear(who);
-      who.append(agentWho(State.focusTask, "needs permission"));
+      // A chat tool is Nouve itself asking; showing the Claude Code pill here
+      // would read as if the terminal session were the one requesting.
+      if (approval?.kind === "tool") {
+        who.append(agentWho(null, "Nouve needs permission"));
+      } else {
+        who.append(agentWho(State.focusTask, "needs permission"));
+      }
       // The whole point of approving here rather than in the terminal: this line
       // is the command, the file path or the URL being authorised, not just the
       // name of the tool asking.
-      code.textContent = State.pendingApproval?.command || State.pendingApproval?.tool || "…";
+      code.textContent = approval?.command || approval?.tool || "…";
+      // Amber for a routine permission, red the moment the target is a secret or
+      // a destructive command. Re-evaluated on every sync because the same card
+      // serves both — only the request's contents decide the colour.
+      const danger = approval
+        ? classifyApproval(approval.tool, approval.command) === "danger"
+        : false;
+      applyWash(cardEl, danger ? "red" : "amber");
       // Two buttons, built once. Rebuilding them between a mouse-down and a
       // mouse-up would swallow the click, and there is nothing left to vary:
       // "Always" is gone until the remembered-rules list exists to back it.
@@ -323,7 +387,7 @@ function buildQuestion(): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title" });
   const row = h("div", { class: "actions" });
-  const el = h("div", { class: "view" }, card("cyan", stack(116, 16, who, title, row)));
+  const el = h("div", { class: "view" }, card("amber", stack(116, 16, who, title, row)));
   return {
     el,
     sync() {
@@ -332,7 +396,7 @@ function buildQuestion(): ViewHost {
       const task = State.focusTask;
       title.textContent = task?.steps.at(-1) ?? "Claude needs an answer.";
       clear(row);
-      row.append(h("div", { class: "sub", text: "Answer in your terminal — Coucou can't reply for you yet." }));
+      row.append(h("div", { class: "sub", text: "Answer in your terminal — Nouve can't reply for you yet." }));
     },
   };
 }
@@ -396,7 +460,7 @@ function buildConfused(): ViewHost {
 
 function buildNote(): ViewHost {
   const title = h("div", { class: "title" });
-  const el = h("div", { class: "view" }, card(null, h("div", { class: "stack", style: "padding:0 18px 0 98px" }, title)));
+  const el = h("div", { class: "view" }, card("calm", h("div", { class: "stack", style: "padding:0 18px 0 98px" }, title)));
   return {
     el,
     sync() {
@@ -447,7 +511,7 @@ function buildSettings(actions: ViewActions): ViewHost {
   );
 
   const el = h("div", { class: "view" },
-    card(null, h("div", { class: "stack", style: "padding:14px 16px 14px 84px" }, rows)));
+    card("calm", h("div", { class: "stack", style: "padding:14px 16px 14px 84px" }, rows)));
 
   return {
     el,
@@ -471,14 +535,14 @@ function buildSettings(actions: ViewActions): ViewHost {
 
 // ── Placeholders filled in later stages ───────────────────────────────────────
 
-function buildPlaceholder(title: string, sub: string): ViewHost {
+function buildPlaceholder(title: string, sub: string, wash: Wash = "calm"): ViewHost {
   const body = h(
     "div",
     { class: "stack", style: "padding:0 18px 0 118px" },
     h("div", { class: "title", text: title }),
     h("div", { class: "sub", text: sub }),
   );
-  return { el: h("div", { class: "view" }, card(null, body)), sync() {} };
+  return { el: h("div", { class: "view" }, card(wash, body)), sync() {} };
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -503,7 +567,8 @@ export function buildViews(
   map.set("choose", buildChoose(actions));
   // Not in the Windows v1: sending a file by email, window attach + web result.
   map.set("mail", buildPlaceholder("Sending by email isn't in this version.", ""));
-  map.set("searching", buildPlaceholder("Claude is searching…", ""));
-  map.set("result", buildPlaceholder("Result", ""));
+  // Cyan marks work in flight: a search running, and the result it lands on.
+  map.set("searching", buildPlaceholder("Claude is searching…", "", "cyan"));
+  map.set("result", buildPlaceholder("Result", "", "cyan"));
   return map;
 }

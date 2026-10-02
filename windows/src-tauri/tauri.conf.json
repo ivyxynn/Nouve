@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Coucou",
+  "productName": "Nouve",
   "version": "0.1.1",
-  "identifier": "fr.louisraille.coucou",
+  "identifier": "fr.dhan4u.nouve",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -18,7 +18,7 @@
     "windows": [
       {
         "label": "island",
-        "title": "Coucou",
+        "title": "Nouve",
         "url": "index.html",
         "width": 240,
         "height": 6,
@@ -29,7 +29,7 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "focus": false,
-        "visible": true,
+        "visible": false,
         "center": false,
         "maximizable": false,
         "minimizable": false,
@@ -48,11 +48,11 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "resources": { "../target/release/coucou-hook.exe": "coucou-hook.exe" },
-    "copyright": "© Louis Raille",
+    "resources": { "../target/release/nouve-hook.exe": "nouve-hook.exe" },
+    "copyright": "© 2026 Louis Raille (original UI & animations, MIT) · Dhan4u (Nouve fork: backend, brain, memory)",
     "category": "DeveloperTool",
-    "shortDescription": "Mochi lives at the top of your screen",
-    "longDescription": "Coucou puts Mochi at the top of your screen: it shows your Claude Code sessions and a few integrations, and lets you approve, answer, chat and drop files without leaving what you are doing.",
+    "shortDescription": "Nouve lives at the top of your screen",
+    "longDescription": "Nouve lives at the top of your screen: it shows your Claude Code sessions and a few integrations, and lets you approve, answer, chat and drop files without leaving what you are doing.",
     "windows": {
       "nsis": {
         "installMode": "currentUser",

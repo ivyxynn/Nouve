@@ -7,6 +7,7 @@ import { Bridge, type ChatContext } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import type { ViewHost } from "./views";
+import { card } from "./card";
 
 let nextId = 1;
 
@@ -51,9 +52,8 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const el = h(
     "div",
     { class: "view" },
-    h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, chipRow, log, bar)),
+    card("calm", h("div", { class: "chat-body" }, chipRow, log, bar)),
   );
-  (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
   let sending = false;
   let renderedCount = -1;

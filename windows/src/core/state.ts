@@ -1,7 +1,7 @@
 // App state — mirror of AppState.swift (the parts the island needs).
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
-import type { EyeShape } from "../mochi/engine";
+import type { EyeShape } from "../nouve/engine";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
 export type PillBadge = "approval" | "finished" | "error";
@@ -26,6 +26,8 @@ export interface ApprovalInfo {
   sessionId: string;
   tool: string;
   command: string;
+  /** `hook` = Claude Code asking; `tool` = Nouve's own chat tool (ohmypii/write_file). */
+  kind: "hook" | "tool";
 }
 
 export interface ChatMessage {
@@ -59,6 +61,7 @@ const task = (
 /** AgentTask.integrationAgents — same ids, names and colours as macOS. */
 export const INTEGRATION_AGENTS: AgentTask[] = [
   task("integration_claude", "VS Code", "#F5F6F8", "claudeCode"),
+  task("integration_terminal", "Terminal (OMP)", "#4CAF50", "claudeCode"),
   task("integration_resend", "Resend", "#22C55E", "n8n"),
   task("integration_n8n", "n8n", "#F29B38", "n8n"),
   task("integration_vercel", "Vercel", "#7C5CFF", "n8n"),
@@ -69,7 +72,7 @@ export const INTEGRATION_AGENTS: AgentTask[] = [
 ];
 
 export const TOGGLEABLE_INTEGRATION_IDS = [
-  "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
+  "integration_terminal", "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
   "integration_notion", "integration_calcom", "integration_stripe",
 ];
 
@@ -100,7 +103,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCloseInterval: 15,
   absenceInterval: 180,
   activeIntegrations: [
-    "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
+    "integration_terminal", "integration_github", "integration_vercel", "integration_resend",
   ],
   screen: "primary",
   autostart: false,
@@ -116,6 +119,12 @@ class AppState {
 
   tasks: AgentTask[] = [];
   focusId: string | null = null;
+  /**
+   * Tint kept across a Minimize. The terminal's green has to outlive the focus
+   * jumping back to VS Code, otherwise the "I just opened a terminal" signal is
+   * lost the instant the panel closes. Picking a pill clears it.
+   */
+  private pinnedAccentId: string | null = null;
 
   stateOverride: BotStateName | null = null;
 
@@ -158,6 +167,37 @@ class AppState {
 
   get focusTask(): AgentTask | null {
     return this.tasks.find((t) => t.id === this.focusId) ?? this.tasks[0] ?? null;
+  }
+
+  /**
+   * Colour the mascot paints itself with. Normally the focused pill's own
+   * colour, but a Minimize pins the accent to the pill we just left so the
+   * signal survives the focus moving elsewhere. Dynamic agent pills never tint
+   * the bot, matching the original behaviour.
+   */
+  get accentColor(): string | null {
+    const pinned = this.pinnedAccentId
+      ? this.tasks.find((t) => t.id === this.pinnedAccentId) ?? null
+      : null;
+    if (this.pinnedAccentId && !pinned) this.pinnedAccentId = null;
+    const task = pinned ?? this.focusTask;
+    return task?.isIntegration ? task.color : null;
+  }
+
+  /**
+   * Keep the mascot on `id`'s colour even though the focus is about to move.
+   * Used by Minimize: we leave the terminal view, but the bot stays green.
+   */
+  pinAccent(id: string) {
+    this.pinnedAccentId = id;
+    this.notify();
+  }
+
+  /** Picking a pill by hand drops any pinned accent. */
+  clearAccent() {
+    if (!this.pinnedAccentId) return;
+    this.pinnedAccentId = null;
+    this.notify();
   }
 
   get effectiveState(): BotStateName {
@@ -203,7 +243,7 @@ class AppState {
   loadIntegrationTasks() {
     for (const proto of INTEGRATION_AGENTS) {
       const shouldLoad =
-        proto.id === "integration_claude" || this.settings.activeIntegrations.includes(proto.id);
+        proto.id === "integration_claude" || proto.id === "integration_terminal" || this.settings.activeIntegrations.includes(proto.id);
       const idx = this.tasks.findIndex((t) => t.id === proto.id);
       if (shouldLoad && idx < 0) this.tasks.push({ ...proto, steps: [] });
       if (!shouldLoad && idx >= 0) this.tasks.splice(idx, 1);
@@ -264,7 +304,7 @@ class AppState {
   }
 
   defaultView(): IslandViewName {
-    return this.tasks.length === 0 ? "empty" : "overview";
+    return "overview";
   }
 }
 

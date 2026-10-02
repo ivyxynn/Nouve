@@ -1,3 +1,4 @@
+import { terminalCard, type LeaveReason } from './terminal';
 // Integration cards shown in the overview's left card — DOM ports of
 // IntegrationCardView and friends from IslandViewContent.swift.
 //
@@ -379,6 +380,8 @@ export interface IntegrationCardHooks {
   openDetail(): void;
   closeDetail(): void;
   openSettings(): void;
+  /** Terminal panel only: leave the terminal view (Minimize / Close / exit). */
+  closeTerminal(reason: LeaveReason): void;
 }
 
 /** True when this integration has data worth showing instead of the idle card. */
@@ -398,12 +401,17 @@ export function hasIntegrationData(id: string): boolean {
       return arr(id, "pages").length > 0;
     case "integration_calcom":
       return info.loaded;
+    case "integration_terminal":
+      return true;
     default:
       return false;
   }
 }
 
 export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHooks): HTMLElement {
+  if (task.id === "integration_terminal") {
+    return terminalCard(hooks.closeTerminal);
+  }
   if (task.id === "integration_n8n") {
     const hasActivity = task.steps.length > 0 && (task.state === "finished" || task.state === "error");
     return hooks.detailOpen && hasActivity

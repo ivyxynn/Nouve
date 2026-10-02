@@ -24,7 +24,7 @@ interface HookPayload {
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   /** Optional agent tag: lowercase, digits and hyphens, ≤ 24 chars. */
-  coucou_agent?: string;
+  nouve_agent?: string;
 }
 
 /** Same rule as HookServer.validateAgent on macOS. "claude" is reserved. */
@@ -154,9 +154,9 @@ function handleHook(island: Island, payload: HookPayload) {
   const raw = lastPathComponent(cwd);
   const projectName = aliasProjectName(raw || "Session");
 
-  // Route to the right pill. Valid coucou_agent → dynamic "agent_<name>" pill.
+  // Route to the right pill. Valid nouve_agent → dynamic "agent_<name>" pill.
   // "claude" is reserved; absent or invalid → Claude Code pill unchanged.
-  const validAgent = validateAgent(payload.coucou_agent);
+  const validAgent = validateAgent(payload.nouve_agent);
   const agentId = validAgent ? `agent_${validAgent}` : CLAUDE_ID;
   const isExternalAgent = validAgent !== null;
 
@@ -296,6 +296,7 @@ function handleHook(island: Island, payload: HookPayload) {
         sessionId: payload.session_id ?? "",
         tool,
         command: approvalTarget(tool, input),
+        kind: "hook",
       };
       // The relay's short ack window closes in 800 ms; everything below this
       // line is synchronous, so the card really is up by the time it lands.
@@ -312,7 +313,7 @@ function handleHook(island: Island, payload: HookPayload) {
         State.setPillBadge(CLAUDE_ID, "approval");
         island.reveal();
       }
-      // Coucou answers within 108 s or not at all; after that the terminal has
+      // Nouve answers within 108 s or not at all; after that the terminal has
       // taken over and the card would be lying.
       pendingTimeout = window.setTimeout(() => {
         pendingTimeout = null;

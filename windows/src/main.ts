@@ -6,6 +6,7 @@ import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import { Island } from "./island/island";
 import { registerHookHandlers } from "./island/hooks";
+import { registerToolApprovalHandlers } from "./island/toolApproval";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 
 async function main() {
@@ -62,7 +63,21 @@ async function main() {
   });
 
   registerHookHandlers(island);
+  registerToolApprovalHandlers(island);
   registerIntegrationHandlers(island);
+
+  // The island window ships hidden (lib.rs setup) because WebView2 paints
+  // nothing for its first frames: shown straight away, they are a panel-sized
+  // black rectangle — the flash on every launch, worse on a cold start. We wait
+  // for the first frame to be composited before showing it, so the greeting is
+  // the first thing on screen. rAF can be paused while a window is hidden, so a
+  // short timeout guarantees the launch still happens.
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    window.setTimeout(resolve, 250);
+  });
+  void Bridge.log("island: first frame painted, showing window");
+  await Bridge.islandReady();
 
   island.launch();
 

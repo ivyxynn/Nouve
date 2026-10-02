@@ -15,7 +15,7 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T |
   try {
     return await invoke<T>(cmd, args);
   } catch (err) {
-    console.error(`[coucou] ${cmd} failed`, err);
+    console.error(`[nouve] ${cmd} failed`, err);
     return null;
   }
 }
@@ -50,6 +50,12 @@ export const Bridge = {
 
   reposition: () => call<void>("reposition"),
 
+  /**
+   * The page has painted its first frame — show the island window. It ships
+   * hidden so WebView2's unpainted frames never appear as a black rectangle.
+   */
+  islandReady: () => call<void>("island_ready"),
+
   openUrl: (url: string) => call<void>("open_url", { url }),
 
   /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
@@ -58,8 +64,18 @@ export const Bridge = {
   quit: () => call<void>("quit_app"),
 
   openSettingsWindow: () => call<void>("open_settings_window"),
+  getModels: () => call<string[]>("get_available_models"),
 
-  /** Writes to %LOCALAPPDATA%\Coucou\coucou.log, next to the Rust lines. */
+  terminalOpen: (id: string, cwd?: string, cols?: number, rows?: number) =>
+    call<void>("terminal_open", { id, cwd, cols, rows }),
+  terminalWrite: (id: string, data: string) =>
+    call<void>("terminal_write", { id, data }),
+  terminalResize: (id: string, cols: number, rows: number) =>
+    call<void>("terminal_resize", { id, cols, rows }),
+  terminalClose: (id: string) =>
+    call<void>("terminal_close", { id }),
+
+  /** Writes to %LOCALAPPDATA%\Nouve\nouve.log, next to the Rust lines. */
   log: (message: string) => call<void>("log_line", { message }),
 
   // ── Claude Code hooks ─────────────────────────────────────────────────────
@@ -79,6 +95,10 @@ export const Bridge = {
   approvalAck: (requestId: string) => call<void>("approval_ack", { requestId }),
   /** "Nobody can act on this" — Claude Code asks in the terminal right away. */
   approvalDecline: (requestId: string) => call<void>("approval_decline", { requestId }),
+
+  /** Allow/Deny for one of Nouve's own chat tools (ohmypii, write_file). */
+  toolApprovalDecision: (requestId: string, decision: "allow" | "deny") =>
+    call<void>("tool_approval_decision", { requestId, decision }),
 
   // ── Chat, files, secrets ──────────────────────────────────────────────────
   /** One chat turn. The API key and any file bytes never leave Rust. */
@@ -135,7 +155,7 @@ export interface HookPreview {
 
 /** Same as `call`, but surfaces the error so the UI can show what went wrong. */
 async function callOrThrow<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (!IS_TAURI) throw new Error("not running inside Coucou");
+  if (!IS_TAURI) throw new Error("not running inside Nouve");
   return invoke<T>(cmd, args);
 }
 

@@ -3,11 +3,12 @@
 
 use keyring::Entry;
 
-const SERVICE: &str = "fr.louisraille.coucou";
+const SERVICE: &str = "fr.dhan4u.nouve";
 
-/// Every key Coucou may store. Anything outside this list is refused.
+/// Every key Nouve may store. Anything outside this list is refused.
 pub const KNOWN_KEYS: &[&str] = &[
     "anthropic-api-key",
+    "9router-api-key",
     "n8n-url",
     "n8n-api-key",
     "vercel-token",

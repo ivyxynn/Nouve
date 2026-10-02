@@ -1,5 +1,5 @@
 {
-  "name": "coucou-windows",
+  "name": "nouve-windows",
   "private": true,
   "version": "0.1.1",
   "type": "module",
@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "icons": "node scripts/gen-icons.mjs",
     "tauri": "tauri",
-    "predev": "cargo build --release -p coucou-hook",
-    "prebuild": "cargo build --release -p coucou-hook",
+    "predev": "cargo build --release -p nouve-hook",
+    "prebuild": "cargo build --release -p nouve-hook",
     "pack": "tauri build && node scripts/pack.mjs"
   },
   "devDependencies": {
@@ -19,6 +19,8 @@
     "vite": "^6"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2"
+    "@tauri-apps/api": "^2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0"
   }
 }

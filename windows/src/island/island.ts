@@ -1,4 +1,4 @@
-// The island: DOM shell, sizing animation, Mochi placement, mouse handling.
+// The island: DOM shell, sizing animation, Nouve placement, mouse handling.
 // Mirrors IslandRootView.swift + IslandWindowController.swift.
 
 import { Tracked, Spring, clamp } from "../core/anim";
@@ -11,9 +11,9 @@ import {
 } from "../core/layout";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
-import { BotEngine, hexToRGB } from "../mochi/engine";
-import { Greeting } from "../mochi/greeting";
-import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
+import { BotEngine, hexToRGB } from "../nouve/engine";
+import { Greeting } from "../nouve/greeting";
+import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../nouve/minibots";
 import { UploadCanvas } from "../upload/canvas";
 import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
@@ -23,6 +23,8 @@ import { IslandStateMachine } from "./fsm";
 const BOT_OVERHANG = 40;
 /** Same margin as the Rust hit test (src-tauri/src/island.rs). */
 const HIT_MARGIN = 14;
+/** Length of the Minimize/Close shrink; matches the CSS keyframe in style.css. */
+const SHRINK_MS = 340;
 
 /** The three views the drop sequence owns; leaving them stops the engine. */
 const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading", "choose"]);
@@ -66,7 +68,9 @@ export class Island {
   private dirty = true;
   private canvasPx = 0;
 
-  // Rust starts the window at full size so the launch greeting has room.
+  // Rust starts the window hidden and shows it once the page has painted (see
+  // Island.prepareLaunch / the `island_ready` command), so WebView2's first,
+  // unpainted frames are never on screen.
   private collapsed = false;
   private collapseTimer: number | null = null;
   private wasInIsland = false;
@@ -83,6 +87,8 @@ export class Island {
   private confusedRecovery: number | null = null;
   private prevViewBeforeConfused: IslandViewName = "overview";
   private lastSyncedView: IslandViewName | null = null;
+  /** Pending cleanup for the Minimize/Close shrink class. */
+  private shrinkTimer: number | null = null;
 
   /** Drop sequence bookkeeping: last tick played, and whether the ✓ has fired. */
   private uploadTens = 0;
@@ -108,7 +114,21 @@ export class Island {
       setView: (v) => this.setView(v),
       collapse: () => this.collapse(),
       setFocus: (id) => {
+        // Choosing a pill by hand drops whatever colour a Minimize left pinned.
+        State.clearAccent();
         State.setFocus(id);
+        this.expand("overview");
+        Sound.play("blip");
+      },
+      // Terminal Minimize / Close / `exit`: leave the panel for the overview,
+      // playing the shrink. Minimize also pins the terminal's green, so the bot
+      // keeps signalling "a terminal is still running" after the focus moves on.
+      leaveTerminal: (reason) => {
+        if (reason === "minimize") State.pinAccent("integration_terminal");
+        else State.clearAccent();
+        this.playShrink();
+        State.setFocus("integration_claude");
+        this.expand("overview");
         Sound.play("blip");
       },
       openTerminal: () => {
@@ -139,7 +159,13 @@ export class Island {
         void Bridge.log(`decide ${d} req=${req?.requestId ?? "none"}`);
         if (!req) return;
         Sound.play(d === "deny" ? "blip" : "approve");
-        void Bridge.approvalDecision(req.requestId, d);
+        // Hook approvals go back over the pipe to Claude Code; Nouve's own chat
+        // tools go back to the chat loop waiting on the approval channel.
+        if (req.kind === "hook") {
+          void Bridge.approvalDecision(req.requestId, d);
+        } else {
+          void Bridge.toolApprovalDecision(req.requestId, d);
+        }
         State.pendingApproval = null;
         State.isPinned = false;
         this.fsm.pinned = false;
@@ -182,7 +208,7 @@ export class Island {
     for (const v of this.views.values()) this.viewsEl.append(v.el);
     this.contentEl = h("div", { id: "content" }, this.header.el, this.viewsEl);
 
-    // The drop sequence draws the card, the bar and its own Mochi. It sits under
+    // The drop sequence draws the card, the bar and its own Nouve. It sits under
     // the header, which stays visible on top of it exactly as on macOS.
     this.uploadCanvas = new UploadCanvas({
       ask: () => {
@@ -231,17 +257,17 @@ export class Island {
           this.setMode("hidden");
           break;
         case "petit":
-          if (from === "coucou") this.greeting.interrupt();
+          if (from === "nouve") this.greeting.interrupt();
           else if (from === "hidden") Sound.play("peek");
           this.setMode("compact");
-          if (from === "coucou") State.view = State.defaultView();
+          if (from === "nouve") State.view = State.defaultView();
           if (!this.wasInIsland) this.fsm.mouseLeft();
           break;
         case "home":
-          this.expand(State.defaultView());
+          this.expand("overview");
           if (!this.wasInIsland) this.fsm.mouseLeft();
           break;
-        case "coucou":
+        case "nouve":
           this.expand("greeting");
           this.greeting.start();
           break;
@@ -380,7 +406,7 @@ export class Island {
   }
 
   /**
-   * Mochi eats the file. Nothing here waits on the file system: the copy into
+   * Nouve eats the file. Nothing here waits on the file system: the copy into
    * the inbox runs in the background and swaps the path in when it lands, so a
    * slow disk can never stall the animation — same as FileDropHandler on macOS.
    */
@@ -422,7 +448,7 @@ export class Island {
 
   /**
    * Sounds and view changes hung off the canvas timeline: a `tick` every 10 %,
-   * the ✓ chime when the bar completes, then `choose` once Mochi has grown back.
+   * the ✓ chime when the bar completes, then `choose` once Nouve has grown back.
    */
   private stepSequence() {
     const since = UploadSeq.sinceDrop();
@@ -467,6 +493,26 @@ export class Island {
       this.radius.springTo(r);
     }
     this.ensureRunning();
+  }
+
+  /**
+   * Minimize / Close flourish: the panel dips toward the mascot while the bot
+   * squashes, then both spring back. The pill swap happens underneath the dip,
+   * so the overview appears to arrive with the shrink rather than after it.
+   */
+  private playShrink() {
+    this.engine.squash();
+    const el = this.contentEl;
+    el.classList.remove("shrinking");
+    // Reading a layout property restarts the animation when the class is re-added
+    // within the same frame (double-click Minimize).
+    void el.offsetWidth;
+    el.classList.add("shrinking");
+    if (this.shrinkTimer != null) window.clearTimeout(this.shrinkTimer);
+    this.shrinkTimer = window.setTimeout(() => {
+      el.classList.remove("shrinking");
+      this.shrinkTimer = null;
+    }, SHRINK_MS);
   }
 
   private applyGeometry() {
@@ -586,7 +632,7 @@ export class Island {
       y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
 
     if (inIsland && !this.wasInIsland) {
-      if (this.fsm.state === "coucou") this.greeting.hover();
+      if (this.fsm.state === "nouve") this.greeting.hover();
       this.fsm.mouseEntered();
       this.homeCollapseAt = null;
     }
@@ -706,7 +752,7 @@ export class Island {
         this.greeting.draw(gctx);
       }
     } else {
-      // Kept running even while the drop canvas is up, so the island's own Mochi
+      // Kept running even while the drop canvas is up, so the island's own Nouve
       // is already in the right place the moment the canvas fades out.
       this.drawBot(dt);
     }
@@ -750,7 +796,7 @@ export class Island {
     this.botSize.target = p.diameter / 0.6;
 
     const greetingActive = State.mode === "expanded" && State.view === "greeting";
-    // The drop canvas draws its own Mochi; two of them would overlap.
+    // The drop canvas draws its own Nouve; two of them would overlap.
     const visible = p.opacity > 0 && !greetingActive && !this.uploadActive;
     this.botCanvas.style.opacity = visible ? "1" : "0";
 
@@ -787,8 +833,8 @@ export class Island {
     const ctx = this.botCanvas.getContext("2d");
     if (!ctx) return;
 
-    const focus = State.focusTask;
-    this.engine.bodyColor = focus?.isIntegration ? hexToRGB(focus.color) : null;
+    const accent = State.accentColor;
+    this.engine.bodyColor = accent ? hexToRGB(accent) : null;
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();

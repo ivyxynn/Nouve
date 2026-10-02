@@ -1,5 +1,12 @@
 # Coucou — name, character and artwork
 
+> **Nouve fork notice.** This file is the **upstream** asset notice and is kept
+> verbatim on purpose. It states that the names “Coucou” and “Mochi”, the Mochi
+> character, the icon, the sounds and the media remain the property of Louis
+> Raillé, and that a fork must ship under **its own** name, icon, character and
+> sounds. The Nouve fork complies: it is named **Nouve** and does not use the
+> Coucou/Mochi brand or artwork. See [README.md](README.md#credits) for credits.
+
 Copyright (c) 2026 Louis Raillé. All rights reserved, except as stated below.
 
 The [MIT License](LICENSE) covers the **source code** of Coucou. It does **not** cover the brand and the artwork listed here, which remain the property of Louis Raillé:

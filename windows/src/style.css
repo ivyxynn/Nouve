@@ -1,4 +1,4 @@
-/* Coucou for Windows — same palette, sizes and type scale as the macOS island.
+/* Nouve for Windows — same palette, sizes and type scale as the macOS island.
    Every colour below is copied from the Swift views. */
 
 :root {
@@ -165,7 +165,7 @@ body {
   transition: opacity 0.25s ease-in-out;
 }
 
-/* A mini Mochi: the slot is the body, the canvas is larger and overflows it so
+/* A mini Nouve: the slot is the body, the canvas is larger and overflows it so
    hands, badges and particles are not cut off. */
 .mini {
   position: relative;
@@ -190,6 +190,29 @@ body {
   display: flex;
   flex-direction: column;
   transition: opacity 0.2s ease-in-out;
+}
+
+/* Minimize / Close: the panel squeezes toward the mascot and springs back,
+   riding the same 340 ms closeCurve the island geometry uses. The DOM swaps to
+   the pills underneath the dip, so the change of content is hidden by the fade. */
+#content.shrinking {
+  transform-origin: 68px 50%;
+  animation: panel-shrink 340ms cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+@keyframes panel-shrink {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  45% {
+    transform: scale(0.86);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 #header {
@@ -738,10 +761,6 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* ── Chat (prompt view) ─────────────────────────────────────────────────── */
-
-.chat-card {
-  overflow: hidden;
-}
 
 .chat-body {
   position: relative;

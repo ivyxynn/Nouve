@@ -48,7 +48,7 @@ function claudeSection(status: HookStatus): HTMLElement {
   const section = h(
     "section",
     {},
-    h("h2", {}, statusDot(status.installed), h("span", { text: "Claude Code" })),
+    h("h2", {}, statusDot(status.installed), h("span", { text: "Nouve System" })),
     body,
   );
 
@@ -59,7 +59,7 @@ function claudeSection(status: HookStatus): HTMLElement {
     draw();
     const head = section.querySelector("h2")!;
     clear(head);
-    head.append(statusDot(status.installed), h("span", { text: "Claude Code" }));
+    head.append(statusDot(status.installed), h("span", { text: "Nouve System" }));
   };
 
   function draw() {
@@ -67,7 +67,7 @@ function claudeSection(status: HookStatus): HTMLElement {
       h("div", {
         class: "hint",
         text: status.installed
-          ? "Coucou is hooked into your Claude Code sessions. Tool calls, questions and permission requests show up in the island, and you can answer them there."
+          ? "Nouve is hooked into your Claude Code sessions. Tool calls, questions and permission requests show up in the island, and you can answer them there."
           : "Install the hooks to see your Claude Code sessions in the island and approve permissions without leaving what you are doing.",
       }),
       h("div", { class: "row" },
@@ -84,7 +84,7 @@ function claudeSection(status: HookStatus): HTMLElement {
     if (!status.hookReady) {
       body.append(h("div", {
         class: "notice warn",
-        text: "coucou-hook.exe is not in place yet. Restart Coucou; if it still fails, build it with `cargo build -p coucou-hook`.",
+        text: "nouve-hook.exe is not in place yet. Restart Nouve; if it still fails, build it with `cargo build -p nouve-hook`.",
       }));
     }
 
@@ -135,7 +135,7 @@ function claudeSection(status: HookStatus): HTMLElement {
         class: "hint",
         text: install
           ? "This is exactly what will change in your settings.json. Your own hooks are left untouched."
-          : "This removes Coucou's entries only. Your own hooks are left untouched.",
+          : "This removes Nouve's entries only. Your own hooks are left untouched.",
       }),
       renderDiff(preview.diff),
       h("div", { class: "row" },
@@ -171,12 +171,14 @@ function claudeSection(status: HookStatus): HTMLElement {
   return section;
 }
 
-// ── Claude API section ────────────────────────────────────────────────────────
+// ── 9Router API section ───────────────────────────────────────────────────────
 
 const MODELS: [string, string][] = [
-  ["claude-opus-5", "Claude Opus 5"],
-  ["claude-sonnet-5", "Claude Sonnet 5"],
-  ["claude-haiku-4-5", "Claude Haiku 4.5"],
+  ["gemini-1.5-pro-latest", "Gemini 1.5 Pro"],
+  ["gemini-1.5-flash", "Gemini 1.5 Flash"],
+  ["gemini-1.0-pro", "Gemini 1.0 Pro"],
+  ["gpt-4o", "GPT-4o"],
+  ["claude-3-5-sonnet-20240620", "Claude 3.5 Sonnet"],
 ];
 
 function apiSection(hasKey: boolean): HTMLElement {
@@ -185,7 +187,7 @@ function apiSection(hasKey: boolean): HTMLElement {
 
   const field = h("input", {
     type: "password",
-    placeholder: hasKey ? "••••••••••••  (stored)" : "sk-ant-...",
+    placeholder: hasKey ? "••••••••••••  (stored)" : "9router key...",
     style: "flex:1 1 auto;min-width:0",
     autocomplete: "off",
     spellcheck: "false",
@@ -196,12 +198,12 @@ function apiSection(hasKey: boolean): HTMLElement {
   const feedback = h("div", {});
 
   async function refresh() {
-    const present = (await Bridge.secretPresent("anthropic-api-key")) ?? false;
+    const present = (await Bridge.secretPresent("9router-api-key")) ?? false;
     dot.style.background = present ? "#22c55e" : "#f4505e";
     state.textContent = present
       ? "Key saved in the Windows Credential Manager."
       : "No key yet — the chat needs one.";
-    field.placeholder = present ? "••••••••••••  (stored)" : "sk-ant-...";
+    field.placeholder = present ? "••••••••••••  (stored)" : "9router key...";
     clearBtn.style.display = present ? "" : "none";
   }
 
@@ -210,7 +212,7 @@ function apiSection(hasKey: boolean): HTMLElement {
     if (!value) return;
     clear(feedback);
     try {
-      await Bridge.secretSet("anthropic-api-key", value);
+      await Bridge.secretSet("9router-api-key", value);
       field.value = "";
       feedback.append(h("div", { class: "notice ok", text: "Saved. It never touches disk." }));
       await refresh();
@@ -222,7 +224,7 @@ function apiSection(hasKey: boolean): HTMLElement {
   clearBtn.addEventListener("click", async () => {
     clear(feedback);
     try {
-      await Bridge.secretClear("anthropic-api-key");
+      await Bridge.secretClear("9router-api-key");
       feedback.append(h("div", { class: "notice ok", text: "Key removed." }));
       await refresh();
     } catch (err) {
@@ -230,13 +232,23 @@ function apiSection(hasKey: boolean): HTMLElement {
     }
   });
 
-  const model = h("select", {}) as HTMLSelectElement;
-  for (const [id, label] of MODELS) model.append(h("option", { value: id, text: label }));
-  if (!MODELS.some(([id]) => id === settings.model)) {
-    model.append(h("option", { value: settings.model, text: settings.model }));
-  }
+  const model = h("input", { type: "text", list: "model-list", placeholder: "Type or pick any 9router model...", style: "flex:1 1 auto;min-width:0" }) as HTMLInputElement;
+  const datalist = h("datalist", { id: "model-list" });
+  for (const [id, label] of MODELS) datalist.append(h("option", { value: id, text: label }));
+  document.body.append(datalist);
+
+  // Fetch all 200+ live 9router models via Rust IPC (bypasses CSP)
+  Bridge.getModels().then((models) => {
+    if (models && models.length > 0) {
+      clear(datalist);
+      for (const mId of models) {
+        datalist.append(h("option", { value: mId, text: mId }));
+      }
+    }
+  }).catch((e) => console.error(e));
+  
   model.value = settings.model;
-  model.addEventListener("change", () => {
+  model.addEventListener("input", () => {
     settings.model = model.value;
     void save();
   });
@@ -246,7 +258,7 @@ function apiSection(hasKey: boolean): HTMLElement {
   return h(
     "section",
     {},
-    h("h2", {}, dot, h("span", { text: "Claude" })),
+    h("h2", {}, dot, h("span", { text: "9Router" })),
     state,
     h("div", { class: "row" }, h("label", { text: "API key" }), field, saveBtn, clearBtn),
     h("div", { class: "row" }, h("label", { text: "Model" }), model),
@@ -265,7 +277,9 @@ interface IntegrationDef {
 }
 
 const INTEGRATIONS: IntegrationDef[] = [
-  { id: "integration_stripe", name: "Stripe", color: "#0570DE",
+  { id: "integration_terminal", name: "Terminal (OMP)", color: "#4CAF50",
+      fields: [{ key: "omp-enabled", label: "Enabled", placeholder: "yes", secret: false }] },
+    { id: "integration_stripe", name: "Stripe", color: "#0570DE",
     fields: [{ key: "stripe-api-key", label: "Secret key", placeholder: "sk_live_…", secret: true }] },
   { id: "integration_github", name: "GitHub", color: "#F4505E",
     fields: [{ key: "github-token", label: "Token", placeholder: "ghp_…", secret: true }] },
@@ -292,7 +306,7 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
 
   function updateNote() {
     const used = settings.activeIntegrations.length;
-    note.textContent = `Pick up to ${MAX_ACTIVE} pills to show next to Mochi — ${used}/${MAX_ACTIVE} in use. Keys are stored in the Windows Credential Manager, never on disk.`;
+    note.textContent = `Pick up to ${MAX_ACTIVE} pills to show next to Nouve — ${used}/${MAX_ACTIVE} in use. Keys are stored in the Windows Credential Manager, never on disk.`;
   }
 
   for (const def of INTEGRATIONS) {
@@ -429,7 +443,7 @@ async function main() {
     installed: false, settingsPath: "", hookPath: "", hookReady: false,
   };
 
-  const hasKey = (await Bridge.secretPresent("anthropic-api-key")) ?? false;
+  const hasKey = (await Bridge.secretPresent("9router-api-key")) ?? false;
 
   const keys = [
     "stripe-api-key", "github-token", "vercel-token",
@@ -440,7 +454,7 @@ async function main() {
 
   clear(root);
   root.append(
-    h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
+    h("h1", {}, h("span", { text: "Nouve" }), h("span", { class: "version", text: version })),
     claudeSection(status),
     apiSection(hasKey),
     integrationsSection(present),

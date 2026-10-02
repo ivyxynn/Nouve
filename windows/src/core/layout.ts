@@ -57,6 +57,8 @@ export const PANEL_H = 320;
 export const NOTCH_W = 184;
 export const NOTCH_H = 32;
 export const COMPACT_W = 288; // NOTCH_W + 104
+// Matches the greeting/upload reference space (640×150 and 640×176): widening it
+// would leave a black strip beside the greeting canvas and offset the drop layer.
 export const EXPANDED_W = 640;
 
 export const ROUNDED_CORNER = 14; // hidden / compact
@@ -67,7 +69,7 @@ export const WAKE_STRIP_W = 240;
 export const WAKE_STRIP_H = 6;
 
 export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
-  overview: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "pills" },
+  overview: { height: 210, botX: 68, botY: null, botDiameter: 58, agentMode: "pills" },
   empty: { height: 160, botX: 70, botY: null, botDiameter: 62, agentMode: "none" },
   approval: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },
   question: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },
@@ -89,7 +91,7 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
 };
 
 // The upload views above are only the fallback geometry. Once a file is actually
-// dropped the whole sequence — Mochi included — is drawn by src/upload, which
+// dropped the whole sequence — Nouve included — is drawn by src/upload, which
 // owns its own constants (USC) straight from UploadSequenceEngine.swift.
 
 /** Chat view grows with the conversation — IslandContainer.chatPromptHeight. */
@@ -219,7 +221,12 @@ export function colorForProject(name: string): string {
 }
 
 // Card wash colours (CardBackground.washColor)
-export type Wash = "red" | "green" | "pink" | "amber" | "cyan" | "indigo" | "soft" | null;
+//
+// The palette doubles as a traffic light: `calm` is the resting state (nothing
+// needs you), `amber` means something is waiting on a decision, `red` means the
+// thing being asked for is destructive. `green` stays reserved for "finished" so
+// a completed job still reads brighter than the everyday calm wash.
+export type Wash = "red" | "green" | "pink" | "amber" | "cyan" | "indigo" | "soft" | "calm" | null;
 
 export function washRGBA(wash: Wash): string {
   switch (wash) {
@@ -227,6 +234,9 @@ export function washRGBA(wash: Wash): string {
       return "rgba(244,80,94,0.55)";
     case "green":
       return "rgba(52,211,153,0.5)";
+    // Deliberately dimmer than `green`: a permanent low-key tint, not a status.
+    case "calm":
+      return "rgba(52,211,153,0.22)";
     case "pink":
       return "rgba(244,114,182,0.55)";
     case "amber":

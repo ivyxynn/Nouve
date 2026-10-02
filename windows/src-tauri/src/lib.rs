@@ -1,4 +1,4 @@
-// Coucou for Windows — app wiring and the commands the island calls.
+// Nouve for Windows — app wiring and the commands the island calls.
 
 mod claude;
 mod files;
@@ -11,6 +11,7 @@ mod platform;
 mod secrets;
 mod settings;
 mod tray;
+mod terminal;
 
 use std::process::Command;
 use std::sync::atomic::Ordering;
@@ -20,7 +21,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
-use claude::{Chat, ChatContext, ChatReply};
+use claude::{Approvals, Chat, ChatContext, ChatReply};
 use files::DroppedFile;
 use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
@@ -69,13 +70,13 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
         (screen_changed, autostart_changed)
     };
     if let Err(err) = settings::save(&settings) {
-        eprintln!("[coucou] could not save settings: {err}");
+        eprintln!("[nouve] could not save settings: {err}");
     }
     if autostart_changed {
         let manager = app.autolaunch();
         let result = if settings.autostart { manager.enable() } else { manager.disable() };
         if let Err(err) = result {
-            eprintln!("[coucou] autostart: {err}");
+            eprintln!("[nouve] autostart: {err}");
         }
     }
     if screen_changed {
@@ -165,6 +166,16 @@ fn open_in_vscode(path: Option<String>) -> bool {
     false
 }
 
+/// The page has painted its first frame. The island window ships hidden (see
+/// setup) so WebView2's unpainted black frames are never seen; this is what
+/// brings it on screen, before the launch greeting starts.
+#[tauri::command]
+fn island_ready(app: AppHandle) {
+    let Some(win) = island::window(&app) else { return };
+    let _ = win.show();
+    let _ = win.set_always_on_top(true);
+}
+
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
@@ -236,13 +247,20 @@ fn approval_decline(app: AppHandle, request_id: String) {
 /// One chat turn. The API key and any file bytes stay on the Rust side.
 #[tauri::command]
 async fn chat_send(
+    app: AppHandle,
     shared: State<'_, Shared>,
     chat: State<'_, Chat>,
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
     let model = shared.settings.lock().unwrap().model.clone();
-    claude::send(&chat, &model, query, context).await
+    claude::send(&app, &chat, &model, query, context).await
+}
+
+/// The island's Allow/Deny button for a chat tool approval.
+#[tauri::command]
+fn tool_approval_decision(app: AppHandle, request_id: String, decision: String) {
+    claude::answer_approval(&app, &request_id, &decision);
 }
 
 #[tauri::command]
@@ -321,7 +339,7 @@ fn create_settings_window(app: &AppHandle) {
     let url = settings_page_url(app);
     match WebviewWindowBuilder::new(app, "settings", url)
         .additional_browser_args(BROWSER_ARGS)
-        .title("Settings — Coucou")
+        .title("Settings — Nouve")
         .inner_size(560.0, 680.0)
         .min_inner_size(460.0, 480.0)
         .resizable(true)
@@ -354,6 +372,33 @@ pub fn show_settings_window(app: &AppHandle) {
 }
 
 #[tauri::command]
+async fn get_available_models() -> Vec<String> {
+    let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(3)).build() {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    if let Ok(resp) = {
+        let mut req = client.get("http://127.0.0.1:20128/v1/models");
+        if let Some(key) = secrets::get("9router-api-key") {
+            req = req.header("authorization", format!("Bearer {key}"));
+        }
+        req.send().await
+    } {
+        if let Ok(json) = resp.json::<serde_json::Value>().await {
+            if let Some(arr) = json.get("data").and_then(|d| d.as_array()) {
+                let models: Vec<String> = arr.iter().filter_map(|m| {
+                    m.get("id").or_else(|| m.get("name")).and_then(|v| v.as_str()).map(|s| s.to_string())
+                }).collect();
+                if !models.is_empty() {
+                    return models;
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+#[tauri::command]
 fn open_settings_window(app: AppHandle) {
     show_settings_window(&app);
 }
@@ -374,6 +419,8 @@ pub fn run() {
         })
         .manage(Pending::default())
         .manage(Chat::default())
+        .manage(Approvals::default())
+        .manage(terminal::TerminalState::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
@@ -381,6 +428,7 @@ pub fn run() {
             set_island_rect,
             focus_window,
             reposition,
+            island_ready,
             open_url,
             open_in_vscode,
             quit_app,
@@ -393,6 +441,7 @@ pub fn run() {
             log_line,
             chat_send,
             chat_reset,
+            tool_approval_decision,
             ingest_file,
             secret_present,
             secret_set,
@@ -401,18 +450,47 @@ pub fn run() {
             open_n8n,
             open_settings_window,
             set_paused,
+            get_available_models,
+            terminal::terminal_open,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_close,
+            terminal::terminal_close_all,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
             tray::build(&handle)?;
-            // Before the island: see create_settings_window.
-            create_settings_window(&handle);
 
+            // Size and place the island before anything slow runs, but leave it
+            // hidden. WebView2 paints nothing for its first frames, and a window
+            // shown at 720×320 during them is a black rectangle the size of the
+            // panel — the flash seen on every launch, worse on a cold start where
+            // building the settings webview below takes seconds. The page calls
+            // `island_ready` once it has painted and the window is shown then; the
+            // greeting only starts after that (see Island.prepareLaunch).
             if let Some(win) = island::window(&handle) {
                 platform::make_non_activating(&win);
                 island::apply_geometry(&handle, &loaded.screen, false);
-                let _ = win.show();
             }
+
+            // Safety net: a page that never boots must not leave the island
+            // invisible for good.
+            {
+                let guard = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(4000));
+                    if let Some(win) = island::window(&guard) {
+                        if !win.is_visible().unwrap_or(true) {
+                            let _ = win.show();
+                        }
+                    }
+                });
+            }
+
+            // The settings window is created hidden at launch and only ever shown
+            // and hidden afterwards. See create_settings_window for why it must
+            // exist this early.
+            create_settings_window(&handle);
             gate.collapsed.store(false, Ordering::Relaxed);
             // Nothing drawn yet, so nothing takes the mouse until the page
             // reports the island's shape.
@@ -422,12 +500,12 @@ pub fn run() {
             gate.set_active(true);
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
-            log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
+            log::line(format!("--- Nouve {} started ---", env!("CARGO_PKG_VERSION")));
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             integrations::start(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Coucou");
+        .expect("error while running Nouve");
 }
