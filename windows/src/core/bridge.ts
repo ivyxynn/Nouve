@@ -65,6 +65,8 @@ export const Bridge = {
 
   openSettingsWindow: () => call<void>("open_settings_window"),
   getModels: () => call<string[]>("get_available_models"),
+  /** Is the local 9router backend usable — key stored and server answering? */
+  routerStatus: () => call<RouterStatus>("router_status"),
 
   terminalOpen: (id: string, cwd?: string, cols?: number, rows?: number) =>
     call<void>("terminal_open", { id, cwd, cols, rows }),
@@ -143,6 +145,14 @@ export interface HookStatus {
   settingsPath: string;
   hookPath: string;
   hookReady: boolean;
+}
+
+/** What `router_status` reports about the local 9router backend. */
+export interface RouterStatus {
+  /** A key is stored in the Credential Manager. */
+  keyPresent: boolean;
+  /** `http://127.0.0.1:20128/v1/models` answered successfully. */
+  online: boolean;
 }
 
 export interface HookPreview {

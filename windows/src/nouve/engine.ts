@@ -14,7 +14,7 @@ export type EyeShape =
   | "pill" | "wide" | "dot" | "line" | "flat" | "happy" | "closed"
   | "spiral" | "heart" | "star" | "tired" | "wink" | "cup";
 
-export type BadgeKind = "dots" | "bang" | "question" | "dot";
+export type BadgeKind = "dots" | "bang" | "question" | "dot" | "spin";
 
 export interface Badge {
   kind: BadgeKind;
@@ -95,7 +95,7 @@ export const BOT_STATES: Record<BotStateName, BotStateCfg> = {
   searching: { ...base, color: C.searching, tint: 0.72, eye: "pill", badge: { kind: "dots", color: C.searching }, scans: true },
   approval: { ...base, color: C.approval, tint: 0.78, eye: "wide", badge: { kind: "bang", color: C.approval }, bounces: true },
   question: { ...base, color: C.question, tint: 0.75, eye: "pill", badge: { kind: "question", color: C.question }, tilt: 0.17 },
-  error: { ...base, color: C.error, tint: 0.78, eye: "flat", badge: { kind: "dot", color: C.error } },
+  error: { ...base, color: C.error, tint: 0.78, eye: "flat", badge: { kind: "bang", color: C.error } },
   finished: { ...base, color: C.finished, tint: 0.35, eye: "happy", badge: { kind: "dot", color: C.finished } },
   ratelimit: { ...base, color: C.ratelimit, tint: 0.72, eye: "tired", badge: { kind: "dot", color: C.ratelimit }, sweat: true },
   sleeping: { ...base, color: C.sleeping, tint: 0.32, eye: "closed", badge: null, breathes: true, zz: true },
@@ -198,6 +198,14 @@ export class BotEngine {
   badge: Badge | null = null;
   private badgeKey = "none";
   private badgeToken = 0;
+  /**
+   * Sits in front of the state's own badge. The island uses it to surface a
+   * signal that outranks the mascot's state — the 9router backend being down,
+   * or an error the user still has to see. `null` = no override; `undefined`
+   * is never stored, `clearBadgeOverride` resets it.
+   */
+  private badgeOverride: Badge | null = null;
+  private hasBadgeOverride = false;
 
   private tweens = new Map<PropKey, Tween>();
   private locks = new Set<PropKey>();
@@ -230,8 +238,7 @@ export class BotEngine {
     this.colT = this.cfg.color;
     if (!this.locks.has("tint")) this.tint = this.cfg.tint;
     if (!this.locks.has("tilt")) this.tgTilt = this.cfg.tilt;
-    this.setBadge(this.cfg.badge);
-
+    this.applyBadge();
     switch (next) {
       case "finished":
         this.doRoll(950, 1);
@@ -271,6 +278,26 @@ export class BotEngine {
       this.badge = b;
       if (b) this.anim("badgeS", [[1, 280, Ease.back]]);
     }, 100);
+  }
+
+  /** Shows `b` on top of the state's own badge until cleared. */
+  setBadgeOverride(b: Badge) {
+    this.hasBadgeOverride = true;
+    this.badgeOverride = b;
+    this.applyBadge();
+  }
+
+  /** Hands the badge back to the current state. */
+  clearBadgeOverride() {
+    if (!this.hasBadgeOverride) return;
+    this.hasBadgeOverride = false;
+    this.badgeOverride = null;
+    this.applyBadge();
+  }
+
+  /** Override wins; otherwise the badge the current state asks for. */
+  private applyBadge() {
+    this.setBadge(this.hasBadgeOverride ? this.badgeOverride : this.cfg.badge);
   }
 
   blink() {
@@ -457,6 +484,7 @@ export class BotEngine {
     return (
       this.tweens.size > 0 ||
       this.particles.length > 0 ||
+      this.badge?.kind === "spin" ||
       this.cfg.bounces || this.cfg.scans || this.cfg.breathes || this.cfg.zz || this.cfg.sweat ||
       this.isMini ||
       Math.abs(this.tgYaw - this.yaw) > 0.002 ||
@@ -1039,6 +1067,20 @@ export class BotEngine {
           x.fill();
         }
       }
+    } else if (badge.kind === "spin") {
+      // Hollow ring with a gap, turning — the "backend unreachable" badge.
+      const r = R * 0.24;
+      const lw = R * 0.09;
+      x.lineWidth = lw;
+      x.lineCap = "round";
+      x.strokeStyle = "#000";
+      x.beginPath();
+      x.arc(0, 0, r, 0, Math.PI * 2);
+      x.stroke();
+      x.strokeStyle = col;
+      x.beginPath();
+      x.arc(0, 0, r, t * 2.6, t * 2.6 + Math.PI * 1.35);
+      x.stroke();
     } else if (badge.kind === "bang" || badge.kind === "question") {
       x.fillStyle = "#000";
       x.beginPath();

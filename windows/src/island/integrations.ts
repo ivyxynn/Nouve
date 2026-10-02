@@ -50,6 +50,9 @@ function handle(island: Island, update: IntegrationUpdate) {
     loaded: update.error ? (previous?.loaded ?? false) : true,
     configured: previous?.configured ?? true,
   };
+  // A poller that just broke wears the exclamation badge; one that was already
+  // broken does not keep re-flagging it.
+  if (update.error && !previous?.error) State.flagError(update.error);
 
   const event = update.event;
   if (event) {
@@ -62,6 +65,7 @@ function handle(island: Island, update: IntegrationUpdate) {
         task.pillBadge = event.success ? "finished" : "error";
       }
       Sound.play(event.success ? "finish" : "error");
+      if (!event.success) State.flagError(`${task.name}: ${event.label}`);
       // Same as the Swift pollers: show the compact island so the badge is seen,
       // but never steal the screen for a successful deploy.
       island.reveal();

@@ -481,8 +481,7 @@ function buildSettings(actions: ViewActions): ViewHost {
   const segButtons = [10, 15, 30].map((s) =>
     h("button", { onclick: () => actions.setAutoClose(s) }, `${s}s`),
   );
-  const claudeBadge = h("span", { class: "status-badge" });
-  const apiBadge = h("span", { class: "status-badge" });
+  const routerBadge = h("span", { class: "status-badge" });
 
   const rows = h(
     "div",
@@ -498,8 +497,7 @@ function buildSettings(actions: ViewActions): ViewHost {
     h(
       "div",
       { class: "settings-row", style: "gap:14px" },
-      claudeBadge,
-      apiBadge,
+      routerBadge,
       h("div", { class: "grow" }),
       h("button", {
         class: "link-btn",
@@ -522,13 +520,13 @@ function buildSettings(actions: ViewActions): ViewHost {
       volume.style.opacity = s.soundEnabled ? "1" : "0.4";
       autoLabel.textContent = `Auto-close · ${Math.round(s.autoCloseInterval)}s`;
       segButtons.forEach((b, i) => b.classList.toggle("on", s.autoCloseInterval === [10, 15, 30][i]));
-      clear(claudeBadge);
-      claudeBadge.append(
-        dot(s.hooksInstalled ? "#22C55E" : "#F4505E", 6),
-        h("span", { text: "Claude Code" }),
+      // One indicator, driven by the 9router backend itself: green when a key is
+      // stored and the server answers, grey otherwise.
+      clear(routerBadge);
+      routerBadge.append(
+        dot(State.routerReady ? "#22C55E" : "#6B7079", 6),
+        h("span", { text: "9Router" }),
       );
-      clear(apiBadge);
-      apiBadge.append(dot("#F4505E", 6), h("span", { text: "API" }));
     },
   };
 }

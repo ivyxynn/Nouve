@@ -2,6 +2,7 @@
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../nouve/engine";
+import type { RouterStatus } from "./bridge";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
 export type PillBadge = "approval" | "finished" | "error";
@@ -113,6 +114,9 @@ export const DEFAULT_SETTINGS: Settings = {
 
 type Listener = () => void;
 
+/** How long an error keeps the mascot's exclamation badge up. */
+const ERROR_PING_MS = 8000;
+
 class AppState {
   mode: IslandMode = "hidden";
   view: IslandViewName = "overview";
@@ -148,6 +152,20 @@ class AppState {
   pendingApproval: ApprovalInfo | null = null;
 
   integrations: Record<string, IntegrationInfo> = {};
+
+  /**
+   * Last `router_status` answer. `null` until the first check lands, so the
+   * island never flashes a "down" badge before it has actually asked.
+   */
+  routerStatus: RouterStatus | null = null;
+  /**
+   * When the last error worth an exclamation mark happened, and what it was.
+   * Errors clear themselves after `ERROR_PING_MS` — a badge that stays up
+   * forever stops meaning anything.
+   */
+  lastErrorAt = 0;
+  lastErrorLabel: string | null = null;
+  private errorTimer: number | null = null;
 
   lastActivity = performance.now();
 
@@ -237,6 +255,55 @@ class AppState {
     if (!t) return;
     t.pillBadge = badge;
     this.notify();
+  }
+
+  /** Stores the latest 9router check. */
+  setRouterStatus(status: RouterStatus | null) {
+    const changed =
+      (this.routerStatus == null) !== (status == null) ||
+      this.routerStatus?.keyPresent !== status?.keyPresent ||
+      this.routerStatus?.online !== status?.online;
+    this.routerStatus = status;
+    if (changed) this.notify();
+  }
+
+  /** The 9router backend is reachable *and* has a key. */
+  get routerReady(): boolean {
+    return this.routerStatus != null && this.routerStatus.keyPresent && this.routerStatus.online;
+  }
+
+  /**
+   * Flags an error the mascot should wear an exclamation mark for. Called from
+   * every failure the user would otherwise never see: a chat turn that died, an
+   * integration poll that came back broken. Clears itself after `ERROR_PING_MS`
+   * — a badge that stays up forever stops meaning anything.
+   */
+  flagError(label: string) {
+    this.lastErrorAt = performance.now();
+    this.lastErrorLabel = label;
+    if (this.errorTimer != null) window.clearTimeout(this.errorTimer);
+    this.errorTimer = window.setTimeout(() => {
+      this.errorTimer = null;
+      this.clearError();
+    }, ERROR_PING_MS);
+    this.notify();
+  }
+
+  /** Clears the exclamation mark (chat succeeded again, or the ping timed out). */
+  clearError() {
+    if (this.errorTimer != null) {
+      window.clearTimeout(this.errorTimer);
+      this.errorTimer = null;
+    }
+    if (this.lastErrorAt === 0) return;
+    this.lastErrorAt = 0;
+    this.lastErrorLabel = null;
+    this.notify();
+  }
+
+  /** True while an error is fresh enough to keep the badge up. */
+  get hasError(): boolean {
+    return this.lastErrorAt !== 0;
   }
 
   /** loadIntegrationTasks() — VS Code always on, the rest opt-in (max 4). */

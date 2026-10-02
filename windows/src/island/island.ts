@@ -25,6 +25,8 @@ const BOT_OVERHANG = 40;
 const HIT_MARGIN = 14;
 /** Length of the Minimize/Close shrink; matches the CSS keyframe in style.css. */
 const SHRINK_MS = 340;
+/** How often the island re-asks whether 9router is up, in ms. */
+const ROUTER_POLL_MS = 20_000;
 
 /** The three views the drop sequence owns; leaving them stops the engine. */
 const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading", "choose"]);
@@ -89,6 +91,8 @@ export class Island {
   private lastSyncedView: IslandViewName | null = null;
   /** Pending cleanup for the Minimize/Close shrink class. */
   private shrinkTimer: number | null = null;
+  /** Slow 9router liveness poll; null when it isn't running. */
+  private routerTimer: number | null = null;
 
   /** Drop sequence bookkeeping: last tick played, and whether the ✓ has fired. */
   private uploadTens = 0;
@@ -300,6 +304,9 @@ export class Island {
       UploadSeq.deactivate();
     }
     this.updateWindowCollapsed();
+    // The backend poll only runs while something can show its result.
+    if (mode === "hidden") this.stopRouterWatch();
+    else this.startRouterWatch();
     this.animateGeometry(modeOrder(mode) < modeOrder(prev));
     State.notify();
   }
@@ -904,6 +911,9 @@ export class Island {
       } else if (wasChat) {
         void Bridge.focusWindow(false);
       }
+      // Opening the settings view asks the backend again, so the 9Router dot is
+      // never stale by the time someone looks at it.
+      if (State.view === "settings") void this.refreshRouterStatus();
     }
 
     // Compact mini grid
@@ -924,6 +934,49 @@ export class Island {
 
     syncMiniBotStates(State.tasks);
     this.engine.setState(State.effectiveState);
+    this.syncSignalBadge();
+  }
+
+  /**
+   * The badge that outranks the mascot's own state. A backend that cannot be
+   * reached is the loudest thing the island knows, so it wins over everything;
+   * below it, a fresh error keeps an exclamation mark up for a few seconds.
+   */
+  private syncSignalBadge() {
+    const router = State.routerStatus;
+    if (router != null && !router.online) {
+      this.engine.setBadgeOverride({ kind: "spin", color: [0.133, 0.827, 0.933] });
+    } else if (State.hasError) {
+      this.engine.setBadgeOverride({ kind: "bang", color: [0.957, 0.314, 0.369] });
+    } else {
+      this.engine.clearBadgeOverride();
+    }
+  }
+
+  /**
+   * Asks Rust about the 9router backend and re-renders. Cheap (one local HTTP
+   * call) and only ever runs while something is watching: on demand, and on the
+   * slow poll that keeps the badge honest while the island is open.
+   */
+  async refreshRouterStatus(): Promise<void> {
+    const status = await Bridge.routerStatus();
+    State.setRouterStatus(status);
+  }
+
+  /** Starts the slow backend poll. Idempotent. */
+  startRouterWatch() {
+    if (this.routerTimer != null) return;
+    const tick = async () => {
+      await this.refreshRouterStatus();
+      this.routerTimer = window.setTimeout(tick, ROUTER_POLL_MS);
+    };
+    void tick();
+  }
+
+  stopRouterWatch() {
+    if (this.routerTimer == null) return;
+    window.clearTimeout(this.routerTimer);
+    this.routerTimer = null;
   }
 
   /** Applies settings coming from Rust at boot. */

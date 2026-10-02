@@ -78,17 +78,23 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       const reply = await Bridge.chatSend(query, context);
       State.chatHistory.push({ id: nextId++, role: "assistant", content: reply.text });
       State.stateOverride = null;
+      State.clearError();
       Sound.play("finish");
     } catch (err) {
       State.stateOverride = null;
-      State.noteMessage = String(err).replace(/^Error:\s*/, "");
+      const message = String(err).replace(/^Error:\s*/, "");
+      State.noteMessage = message;
       State.view = "note";
+      State.flagError(message);
       Sound.play("error");
     } finally {
       sending = false;
       State.notify();
       onHeightChange();
       input.focus();
+      // A turn that failed because the backend was down is exactly the moment
+      // the badge needs to be right, so ask again straight away.
+      void Bridge.routerStatus().then((s) => State.setRouterStatus(s));
     }
   }
 

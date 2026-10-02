@@ -248,6 +248,7 @@ function handleHook(island: Island, payload: HookPayload) {
 
     case "StopFailure":
       State.updateTask(agentId, "error");
+      State.flagError("Claude Code stopped with an error");
       Sound.play("error");
       if (focused) surface("error", true);
       else State.setPillBadge(agentId, "error");

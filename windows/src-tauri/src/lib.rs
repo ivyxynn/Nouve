@@ -371,6 +371,35 @@ pub fn show_settings_window(app: &AppHandle) {
     let _ = win.set_focus();
 }
 
+/// Whether the local 9router backend is usable: a key is stored *and* the
+/// server answers. The island shows this as the 9Router dot in its settings
+/// view and as a spinning badge while it is down.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterStatus {
+    pub key_present: bool,
+    pub online: bool,
+}
+
+#[tauri::command]
+async fn router_status() -> RouterStatus {
+    let key_present = secrets::get("9router-api-key").is_some();
+    let online = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(1500))
+        .build()
+    {
+        Ok(client) => {
+            let mut req = client.get("http://127.0.0.1:20128/v1/models");
+            if let Some(key) = secrets::get("9router-api-key") {
+                req = req.header("authorization", format!("Bearer {key}"));
+            }
+            matches!(req.send().await, Ok(resp) if resp.status().is_success())
+        }
+        Err(_) => false,
+    };
+    RouterStatus { key_present, online }
+}
+
 #[tauri::command]
 async fn get_available_models() -> Vec<String> {
     let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(3)).build() {
@@ -451,6 +480,7 @@ pub fn run() {
             open_settings_window,
             set_paused,
             get_available_models,
+            router_status,
             terminal::terminal_open,
             terminal::terminal_write,
             terminal::terminal_resize,
